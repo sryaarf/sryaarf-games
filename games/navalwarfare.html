@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Naval Warfare 2D - BETA</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0b1d26;
+      color: #ecf0f1;
+      font-family: monospace;
+      padding: 0;
+      margin: 0;
+      text-align: center;
+    }
+    h1 { margin: 10px 0; }
+    #info, #healthBar, #actions { margin: 8px; }
+    canvas {
+      background: #1f3640;
+      border: 3px solid #00ffe7;
+      margin-top: 10px;
+      touch-action: manipulation;
+    }
+    button {
+      margin: 5px;
+      padding: 8px 16px;
+      font-size: 1rem;
+      background: #00ffe7;
+      color: #000;
+      border: none
+      cursor: pointer;
+    }
+    button:hover { background: #2980b9; }
+    #tutorial {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+    }
+    #tutorial p {
+      margin: 10px;
+      font-size: 1.1em;
+    }
+    #tutorial button {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body align= center>
+  <h1>NAVAL WARFARE 2D - BETA</h1>
+  <div id="tutorial">
+    <h2>Welcome Commander!</h2>
+    <p>This is a turn-based naval strategy game inspired by chess.</p>
+    <p>Objective: Destroy enemy CVN or capture all sectors (A–E).</p>
+    <p>Each ship type has unique skills. Use radar, sonar, UAV, AWACS wisely.</p>
+    <p>Press 'Start Game' to begin your mission.</p>
+    <button onclick="closeTutorial()">Start Game</button>
+  </div>
+  <div id="actions">
+    <button onclick="guideBook()">GUIDE BOOK</button>
+    <a href="sryaarf-games/"><button>BACK TO MENU</button></a>
+  </div>
+  <div id="info">Press \"Start Game\" to begin deployment phase or skip for auto-deployment.</div>
+  <canvas id="gameCanvas" width="520" height="1000"></canvas>
+  <div id="actions">
+    <button onclick="startGame()">Start Game</button>
+    <button onclick="deployFleet()">Deployment Phase</button>
+    <button onclick="moveShip()">Move</button>
+    <button onclick="fireWeapon()">Fire</button>
+    <button onclick="launchSkill('UAV')">UAV Recon</button>
+    <button onclick="launchSkill('AWACS')">AWACS</button>
+    <button onclick="launchSkill('EW')">Electronic Warfare</button>
+    <button onclick="launchSkill('Flare')">Flare</button>
+    <button onclick="launchSkill('Smoke')">Smoke</button>
+    <button onclick="endTurn()">End Turn</button>
+    <button onclick="resetGame()">Reset Game</button>
+  </div>
+  <div id="healthBar">Player HP: 400 | AI HP: 400</div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const gridW = 13, gridH = 25, tileSize = 40;
+    let gameBoard = [], currentPlayer = 1, selected = null, ships = [];
+    let sectors = ['A', 'B', 'C', 'D', 'E'], playerSectors = [], aiSectors = [];
+    let playerHP = 400, aiHP = 400;
+
+    function closeTutorial() {
+      document.getElementById('tutorial').style.display = 'none';
+    }
+    function guideBook() {
+        alert("GAMEPLAY GUIDE!!\nSHIP HEALTH:\nEvery Ship Has Somehealth or durability you can see at text below\n\nCVN: 100\nBB, DLGN, And CGN: 80\nSSBN: 70\nFFG: 60\n\n\nSHIP MOVEMENT\nThere was Range Fpr move the ship top!!\n\nCVN: 2\nBB: 2\nDLGN: 4\nCGN: 3\nSSBN: 4\nFFG: 5")
+    }
+    function startGame() {
+  setupBoard();
+  drawGrid();
+  document.getElementById('info').textContent = "Player Turn: Select a ship to move or attack.";
+}
+function endTurn() {
+  currentPlayer = currentPlayer === 1 ? 2 : 1; // Toggle antara 1 dan 2
+  document.getElementById('info').textContent =
+    currentPlayer === 1
+      ? "Player 1 Turn: Select a ship to move or attack."
+      : "Player 2 Turn: Select a ship to move or attack.";
+}
+
+
+    function drawGrid() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let r = 0; r < gridH; r++) {
+        for (let c = 0; c < gridW; c++) {
+          ctx.strokeStyle = '#444';
+          ctx.strokeRect(c * tileSize, r * tileSize, tileSize, tileSize);
+
+          // Draw grid label (A-Z then AA-...)
+          let colLabel = getColumnLabel(c);
+          let rowLabel = (r + 1).toString();
+          ctx.fillStyle = '#888';
+          if (r === 0) ctx.fillText(colLabel, c * tileSize + 5, 10);
+          if (c === 0) ctx.fillText(rowLabel, 2, r * tileSize + 20);
+        }
+      }
+      ships.forEach(s => drawShip(s));
+    }
+
+    function getColumnLabel(index) {
+      let label = '';
+      while (index >= 0) {
+        label = String.fromCharCode(65 + (index % 26)) + label;
+        index = Math.floor(index / 26) - 1;
+      }
+      return label;
+    }
+
+    function drawShip(ship) {
+      if (isVisible(ship)) {
+        ctx.fillStyle = ship.player === 1 ? '#00ffe7' : '#ff5733';
+        ctx.fillRect(ship.x * tileSize + 1, ship.y * tileSize + 1, tileSize - 2, tileSize - 2);
+        ctx.fillStyle = '#000';
+        ctx.font = '10px monospace';
+        ctx.fillText(ship.code, ship.x * tileSize + 2, ship.y * tileSize + 12);
+      } else {
+        // Hidden ship appears as ??? if in Fog of War
+        ctx.fillStyle = '#555';
+        ctx.fillRect(ship.x * tileSize + 1, ship.y * tileSize + 1, tileSize - 2, tileSize - 2);
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px monospace';
+        ctx.fillText('???', ship.x * tileSize + 2, ship.y * tileSize + 12);
+      }
+    }
+
+    function isVisible(ship) {
+      if (ship.player === currentPlayer) return true; // Always see your own ships
+      // Radar (20 tiles) or Sonar (15 tiles) detection
+      return ships.some(friendly => {
+        if (friendly.player === currentPlayer) {
+          let dx = Math.abs(friendly.x - ship.x);
+          let dy = Math.abs(friendly.y - ship.y);
+          let distance = Math.sqrt(dx * dx + dy * dy);
+          return (friendly.code !== 'SSBN' && distance <= 20) || (friendly.code === 'SSBN' && distance <= 15);
+        }
+        return false;
+      });
+    }
+
+    function setupBoard() {
+      gameBoard = Array.from({ length: gridH }, () => Array(gridW).fill(null));
+      ships = [
+        { code: 'CVN', player: 1, x: 6, y: 24, health: 100 },    
+        { code: 'BB', player: 1, x: 4, y: 24, health: 80 },
+        { code: 'DLGN', player: 1, x: 8, y: 23, health: 80 },
+        { code: 'CGN', player: 1, x: 4, y: 23, health: 80 },
+        { code: 'FFG', player: 1, x: 8, y: 24, health: 60 },
+        { code: 'SSBN', player: 1, x: 6, y: 23, health: 70 },
+        { code: 'CVN', player: 2, x: 6, y: 0, health: 100 },
+        { code: 'BB', player: 2, x: 8, y: 0, health: 80 },
+        { code: 'DLGN', player: 2, x: 4, y: 1, health: 80 },
+        { code: 'CGN', player: 2, x: 8, y: 1, health: 80 },
+        { code: 'FFG', player: 2, x: 4, y: 0, health: 60 },
+        { code: 'SSBN', player: 2, x: 6, y: 1, health: 70 }
+      ];
+      playerSectors = [];
+      aiSectors = [];
+      drawGrid();
+      updateHealthBar();
+    }
+
+    function deployFleet() {
+      alert("Deployment Phase Active - Drag and drop ships to grid (feature coming soon)");
+    }
+
+    function updateHealthBar() {
+      playerHP = ships.filter(s => s.player === 1).reduce((sum, s) => sum + s.health, 0);
+      aiHP = ships.filter(s => s.player === 2).reduce((sum, s) => sum + s.health, 0);
+      document.getElementById('healthBar').textContent = `Player 1 HP: ${playerHP} | Player 2 HP: ${aiHP}`;
+    }
+    function moveShip() {
+      if (!selected) {
+        alert("Select a ship first.");
+        return;
+      }
+      canvas.onclick = function (event) {
+        let target = getGridPos(event);
+        let dx = Math.abs(target.x - selected.x);
+        let dy = Math.abs(target.y - selected.y);
+        let maxMove = getMoveRange(selected.code);
+
+        if (dx + dy <= maxMove) {
+          if (!gameBoard[target.y][target.x]) {
+            // Move
+            gameBoard[selected.y][selected.x] = null;
+            selected.x = target.x;
+            selected.y = target.y;
+            gameBoard[target.y][target.x] = selected;
+            drawGrid();
+            updateHealthBar();
+            canvas.onclick = null;
+          } else {
+            alert("Tile occupied!");
+          }
+        } else {
+          alert("Out of move range!");
+        }
+      };
+    }
+
+    function fireWeapon() {
+      if (!selected) {
+        alert("Select a ship first.");
+        return;
+      }
+      canvas.onclick = function (event) {
+        let target = getGridPos(event);
+        let enemy = ships.find(s => s.x === target.x && s.y === target.y && s.player !== currentPlayer);
+        if (enemy) {
+          let range = getAttackRange(selected.code);
+          let dist = Math.sqrt((enemy.x - selected.x) ** 2 + (enemy.y - selected.y) ** 2);
+          if (dist <= range) {
+            let dmg = getDamage(selected.code);
+            enemy.health -= dmg;
+            if (enemy.health <= 0) {
+              ships = ships.filter(s => s !== enemy);
+              gameBoard[enemy.y][enemy.x] = null;
+            }
+            drawGrid();
+            updateHealthBar();
+            checkVictory();
+            canvas.onclick = null;
+          } else {
+            alert("Target out of range!");
+          }
+        } else {
+          alert("No enemy at selected location.");
+        }
+      };
+    }
+
+    function launchSkill(skill) {
+      if (!selected) {
+        alert("Select a ship first.");
+        return;
+      }
+      switch (skill) {
+        case 'UAV':
+          alert("UAV Recon launched: reveals area around target.");
+          break;
+        case 'AWACS':
+          alert("AWACS active: extend radar range.");
+          break;
+        case 'EW':
+          alert("Electronic Warfare: enemy accuracy reduced.");
+          break;
+        case 'Flare':
+          alert("Flare deployed: avoid incoming missiles.");
+          break;
+        case 'Smoke':
+          alert("Smoke screen deployed: hide from enemy sight.");
+          break;
+      }
+      drawGrid();
+    }
+
+    function getMoveRange(code) {
+      switch (code) {
+        case 'CVN': return 2;
+        case 'DLGN': return 4;
+        case 'CGN': return 3;
+        case 'FFG': return 5;
+        case 'SSBN': return 4;
+        case 'BB': return 1;
+        default: return 3;
+      }
+    }
+
+    function getAttackRange(code) {
+      switch (code) {
+        case 'CVN': return 10; // aircraft
+        case 'DLGN': return 7; // anti-ship missile
+        case 'CGN': return 4; // naval guns
+        case 'FFG': return 4; // naval guns
+        case 'SSBN': return 10; // ballistic missile
+        case 'BB': return 17; // Huge as F Cannon XD
+        default: return 4;
+      }
+    }
+
+    function getDamage(code) {
+      switch (code) {
+        case 'CVN': return 20;
+        case 'DLGN': return 15;
+        case 'CGN': return 10;
+        case 'FFG': return 8;
+        case 'SSBN': return 25;
+        case 'BB': return 30;
+        default: return 10;
+      }
+    }
+
+    function getGridPos(event) {
+      let rect = canvas.getBoundingClientRect();
+      let x = Math.floor((event.clientX - rect.left) / tileSize);
+      let y = Math.floor((event.clientY - rect.top) / tileSize);
+      return { x, y };
+    }
+
+    function checkVictory() {
+      let playerCVN = ships.find(s => s.player === 1 && s.code === 'CVN');
+      let aiCVN = ships.find(s => s.player === 2 && s.code === 'CVN');
+      if (!playerCVN) {
+        alert("Player 2 Win! Player 1 CVN destroyed.");
+      } else if (!aiCVN) {
+        alert("player 1 win! player 2 CVN destroyed.");
+      }
+    }
+
+    canvas.addEventListener('click', function (event) {
+      let pos = getGridPos(event);
+      let clickedShip = ships.find(s => s.x === pos.x && s.y === pos.y && s.player === currentPlayer);
+      if (clickedShip) {
+        selected = clickedShip;
+        document.getElementById('info').textContent = `Selected: ${selected.code} (${selected.x},${selected.y})`;
+      }
+    });
+    //fitur ai aing haouz//
+
+    function inRange(attacker, target) {
+      let dist = Math.sqrt((attacker.x - target.x) ** 2 + (attacker.y - target.y) ** 2);
+      return dist <= getAttackRange(attacker.code);
+    }
+
+    function isInBounds(x, y) {
+      return x >= 0 && y >= 0 && x < gridW && y < gridH;
+    }
+    function resetGame() {
+      setupBoard();
+      currentPlayer = 1;
+      document.getElementById('info').textContent = "Game Reset. Press Start Game to play again.";
+    }
+    function animateProjectile(from, to, type = 'missile') {
+      let step = 0;
+      let steps = 20;
+      let interval = setInterval(() => {
+        drawGrid();
+        let x = from.x + ((to.x - from.x) * step) / steps;
+        let y = from.y + ((to.y - from.y) * step) / steps;
+        ctx.fillStyle = type === 'missile' ? '#ff0' : '#0f0';
+        ctx.beginPath();
+        ctx.arc(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, 5, 0, Math.PI * 2);
+        ctx.fill();
+        step++;
+        if (step > steps) clearInterval(interval);
+      }, 30);
+    }
+
+    function fireWeapon() {
+      if (!selected) {
+        alert("Select a ship first.");
+        return;
+      }
+      canvas.onclick = function (event) {
+        let target = getGridPos(event);
+        let enemy = ships.find(s => s.x === target.x && s.y === target.y && s.player !== currentPlayer);
+        if (enemy) {
+          let range = getAttackRange(selected.code);
+          let dist = Math.sqrt((enemy.x - selected.x) ** 2 + (enemy.y - selected.y) ** 2);
+          if (dist <= range) {
+            animateProjectile(selected, enemy, selected.code === 'CVN' ? 'plane' : 'missile');
+            setTimeout(() => {
+              let dmg = getDamage(selected.code);
+              enemy.health -= dmg;
+              if (enemy.health <= 0) {
+                ships = ships.filter(s => s !== enemy);
+                gameBoard[enemy.y][enemy.x] = null;
+              }
+              drawGrid();
+              updateHealthBar();
+              checkVictory();
+            }, 700);
+            canvas.onclick = null;
+          } else {
+            alert("Target out of range!");
+          }
+        } else {
+          alert("No enemy at selected location.");
+        }
+      };
+    }
+
+    function launchSkill(skill) {
+      if (!selected) {
+        alert("Select a ship first.");
+        return;
+      }
+      switch (skill) {
+        case 'UAV':
+          alert("UAV Recon: reveals 10x10 area around target.");
+          break;
+        case 'AWACS':
+          alert("AWACS: extends radar range to 30 tiles for 3 turns.");
+          break;
+        case 'EW':
+          alert("Electronic Warfare: jamming enemy targeting for 2 turns.");
+          break;
+        case 'Flare':
+          alert("Flare: deflect incoming missiles for 1 turn.");
+          break;
+        case 'Smoke':
+          alert("Smoke: hides this ship for 2 turns.");
+          break;
+      }
+      drawGrid();
+    }
+
+    function drawSkillEffects() {
+      ships.forEach(ship => {
+        if (ship.skill === 'Smoke') {
+          ctx.fillStyle = 'rgba(128,128,128,0.5)';
+          ctx.fillRect(ship.x * tileSize, ship.y * tileSize, tileSize, tileSize);
+        }
+      });
+    }
+
+    function drawGrid() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let r = 0; r < gridH; r++) {
+        for (let c = 0; c < gridW; c++) {
+          ctx.strokeStyle = '#444';
+          ctx.strokeRect(c * tileSize, r * tileSize, tileSize, tileSize);
+
+          let colLabel = getColumnLabel(c);
+          let rowLabel = (r + 1).toString();
+          ctx.fillStyle = '#888';
+          if (r === 0) ctx.fillText(colLabel, c * tileSize + 5, 10);
+          if (c === 0) ctx.fillText(rowLabel, 2, r * tileSize + 20);
+        }
+      }
+      drawSkillEffects();
+      ships.forEach(s => drawShip(s));
+    }
+
+    function updateHealthBar() {
+      playerHP = ships.filter(s => s.player === 1).reduce((sum, s) => sum + s.health, 0);
+      aiHP = ships.filter(s => s.player === 2).reduce((sum, s) => sum + s.health, 0);
+      document.getElementById('healthBar').innerHTML =
+        `Player 1 HP: ${playerHP} | Player 2 HP: ${aiHP}<br>` +
+        `Sectors: Player 2(${playerSectors.join(',')}) / Player 2(${aiSectors.join(',')}) Soon Arrived`;
+    }
+</script>
+</body>
+  </html>
